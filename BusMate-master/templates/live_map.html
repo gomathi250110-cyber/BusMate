@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0">
+
+    <title>BusMate - Live Bus Tracking</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}">
+
+    <!-- LEAFLET CSS -->
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+    <style>
+
+        #map {
+
+            width: 100%;
+            height: 500px;
+
+            border-radius: 15px;
+
+            margin-top: 20px;
+        }
+
+        .map-info {
+
+            padding: 20px;
+            margin-bottom: 15px;
+
+            border-radius: 12px;
+
+            background: white;
+        }
+
+        .status {
+
+            font-weight: bold;
+        }
+
+    </style>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='modern.css') }}">
+</head>
+
+
+<body>
+
+<header class="topbar">
+
+    <div>
+
+        <h1>🚌 BusMate</h1>
+
+        <p>Live Bus Tracking</p>
+
+    </div>
+
+    <a
+        href="/"
+        class="logout-btn">
+
+        Logout
+
+    </a>
+
+</header>
+
+
+<main class="container">
+
+
+    <!-- BUS INFORMATION -->
+
+    <section class="welcome-card">
+
+        <h2>
+            📍 Live Bus Location
+        </h2>
+
+        <p id="busInfo">
+            Loading bus information...
+        </p>
+
+        <p
+            class="status"
+            id="locationStatus">
+
+            Connecting...
+
+        </p>
+
+        <p>
+
+            Last Updated:
+
+            <strong id="lastUpdated">
+                ---
+            </strong>
+
+        </p>
+
+    </section>
+
+
+    <!-- MAP -->
+
+    <section class="portal-section">
+
+        <div id="map"></div>
+
+    </section>
+
+
+    <!-- GPS DETAILS -->
+
+    <section class="portal-section">
+
+        <h2>📡 GPS Details</h2>
+
+        <p>
+
+            Latitude:
+
+            <strong id="latitude">
+                ---
+            </strong>
+
+        </p>
+
+        <p>
+
+            Longitude:
+
+            <strong id="longitude">
+                ---
+            </strong>
+
+        </p>
+
+        <p>
+
+            Current Location:
+
+            <strong id="currentLocation">
+                ---
+            </strong>
+
+        </p>
+
+        <p>
+
+            Next Point:
+
+            <strong id="nextPoint">
+                ---
+            </strong>
+
+        </p>
+
+    </section>
+
+
+</main>
+
+
+<!-- LEAFLET JS -->
+
+<script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
+</script>
+
+
+<script>
+
+let map;
+
+let busMarker = null;
+
+let busNumber = null;
+
+
+// ======================================================
+// GET BUS NUMBER
+// ======================================================
+
+const params =
+    new URLSearchParams(
+        window.location.search
+    );
+
+busNumber =
+    params.get("bus");
+
+
+// ======================================================
+// INITIAL MAP
+// ======================================================
+
+function initMap() {
+
+    /*
+        RIT Campus initial position
+    */
+
+    const initialPosition = [
+        12.8256,
+        80.0453
+    ];
+
+
+    map =
+        L.map("map").setView(
+            initialPosition,
+            14
+        );
+
+
+    L.tileLayer(
+        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        {
+            maxZoom: 19,
+            attribution:
+                "&copy; OpenStreetMap contributors"
+        }
+    ).addTo(map);
+
+
+    if (!busNumber) {
+
+        document.getElementById(
+            "locationStatus"
+        ).textContent =
+            "❌ Bus number not provided.";
+
+        return;
+    }
+
+
+    document.getElementById(
+        "busInfo"
+    ).textContent =
+        `Tracking Bus ${busNumber}`;
+
+
+    updateLiveLocation();
+
+
+    /*
+        Update every 5 seconds
+    */
+
+    setInterval(
+        updateLiveLocation,
+        5000
+    );
+}
+
+
+// ======================================================
+// UPDATE LIVE LOCATION
+// ======================================================
+
+async function updateLiveLocation() {
+
+    if (!busNumber) {
+        return;
+    }
+
+
+    try {
+
+        const response =
+            await fetch(
+                `/api/bus-location/${encodeURIComponent(busNumber)}`
+            );
+
+
+        const data =
+            await response.json();
+
+
+        if (!data.success) {
+
+            document.getElementById(
+                "locationStatus"
+            ).textContent =
+                "❌ Bus not found.";
+
+            return;
+        }
+
+
+        /*
+            Driver hasn't shared GPS
+        */
+
+        if (!data.location_shared) {
+
+            document.getElementById(
+                "locationStatus"
+            ).textContent =
+                "🔴 Driver has not shared location yet.";
+
+            if (busMarker) {
+                map.removeLayer(busMarker);
+                busMarker = null;
+            }
+
+            return;
+        }
+
+
+        const latitude =
+            Number(data.latitude);
+
+        const longitude =
+            Number(data.longitude);
+
+
+        if (
+            !Number.isFinite(latitude) ||
+            !Number.isFinite(longitude)
+        ) {
+
+            document.getElementById(
+                "locationStatus"
+            ).textContent =
+                "⚠️ Invalid GPS coordinates.";
+
+            return;
+        }
+
+
+        const position = [
+            latitude,
+            longitude
+        ];
+
+
+        // =================================================
+        // UPDATE TEXT
+        // =================================================
+
+        document.getElementById(
+            "locationStatus"
+        ).textContent =
+            "🟢 Live location active";
+
+
+        document.getElementById(
+            "lastUpdated"
+        ).textContent =
+            data.updated_at || "---";
+
+
+        document.getElementById(
+            "latitude"
+        ).textContent =
+            latitude;
+
+
+        document.getElementById(
+            "longitude"
+        ).textContent =
+            longitude;
+
+
+        document.getElementById(
+            "currentLocation"
+        ).textContent =
+            data.current_location ||
+            "GPS location";
+
+
+        document.getElementById(
+            "nextPoint"
+        ).textContent =
+            data.next_point ||
+            "---";
+
+
+        // =================================================
+        // MOVE MAP
+        // =================================================
+
+        map.setView(
+            position,
+            15
+        );
+
+
+        // =================================================
+        // LIVE LOCATION ONLY
+        // =================================================
+        // Do not draw a route/trail line. The map should show
+        // the driver's current GPS position only.
+
+        // =================================================
+        // CREATE / MOVE LIVE BUS MARKER
+        // =================================================
+
+        if (!busMarker) {
+            const busIcon = L.divIcon({
+                className: "",
+                html: '<div class="bus-live-icon">🚌</div>',
+                iconSize: [42, 42],
+                iconAnchor: [21, 21],
+                popupAnchor: [0, -22]
+            });
+
+            busMarker = L.marker(position, {
+                icon: busIcon,
+                zIndexOffset: 1000
+            }).addTo(map);
+
+            busMarker.bindPopup(
+                `<div class="live-bus-popup">🚌 Bus ${data.bus_number}<br>🟢 Live</div>`
+            );
+        } else {
+            busMarker.setLatLng(position);
+        }
+
+        // Keep the student's/faculty's view following the bus.
+        // Only re-center when the map is already reasonably close,
+        // so manual map exploration is not constantly interrupted.
+        const mapCenter = map.getCenter();
+        const distanceFromCenter = map.distance(mapCenter, position);
+
+        if (distanceFromCenter > 500) {
+            map.panTo(position, {
+                animate: true,
+                duration: 0.7
+            });
+        }
+
+
+    } catch (error) {
+
+        console.error(
+            "Live location error:",
+            error
+        );
+
+
+        document.getElementById(
+            "locationStatus"
+        ).textContent =
+            "⚠️ Unable to connect to server.";
+
+    }
+
+}
+
+
+// ======================================================
+// START
+// ======================================================
+
+document.addEventListener(
+    "DOMContentLoaded",
+    initMap
+);
+
+</script>
+
+</body>
+
+</html>
